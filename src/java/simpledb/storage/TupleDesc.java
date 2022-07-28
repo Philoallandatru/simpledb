@@ -44,10 +44,11 @@ public class TupleDesc implements Serializable {
      * */
     public Iterator<TDItem> iterator() {
         // some code goes here
-        return null;
+        return Arrays.asList(this.items).iterator();
     }
 
     private static final long serialVersionUID = 1L;
+    public final TDItem[] items;
 
     /**
      * Create a new TupleDesc with typeAr.length fields with fields of the
@@ -62,6 +63,10 @@ public class TupleDesc implements Serializable {
      */
     public TupleDesc(Type[] typeAr, String[] fieldAr) {
         // some code goes here
+        this.items = new TDItem[typeAr.length];
+        for (int i = 0; i < typeAr.length; i++) {
+            this.items[i] = new TDItem(typeAr[i], fieldAr[i]);
+        }
     }
 
     /**
@@ -74,6 +79,10 @@ public class TupleDesc implements Serializable {
      */
     public TupleDesc(Type[] typeAr) {
         // some code goes here
+        this.items = new TDItem[typeAr.length];
+        for (int i = 0; i < typeAr.length; i++) {
+            this.items[i] = new TDItem(typeAr[i], "anonymous");
+        }
     }
 
     /**
@@ -81,7 +90,7 @@ public class TupleDesc implements Serializable {
      */
     public int numFields() {
         // some code goes here
-        return 0;
+        return this.items.length;
     }
 
     /**
@@ -95,12 +104,16 @@ public class TupleDesc implements Serializable {
      */
     public String getFieldName(int i) throws NoSuchElementException {
         // some code goes here
-        return null;
+        if (i < 0 || i > this.numFields() - 1) {
+            throw new NoSuchElementException("Index Out of Range");
+        } else {
+            return this.items[i].fieldName;
+        }
     }
 
     /**
      * Gets the type of the ith field of this TupleDesc.
-     * 
+     *
      * @param i
      *            The index of the field to get the type of. It must be a valid
      *            index.
@@ -110,7 +123,11 @@ public class TupleDesc implements Serializable {
      */
     public Type getFieldType(int i) throws NoSuchElementException {
         // some code goes here
-        return null;
+        if (i < 0 || i > this.numFields() - 1) {
+            throw new NoSuchElementException("Index Out of Range");
+        } else {
+            return this.items[i].fieldType;
+        }
     }
 
     /**
@@ -124,7 +141,13 @@ public class TupleDesc implements Serializable {
      */
     public int fieldNameToIndex(String name) throws NoSuchElementException {
         // some code goes here
-        return 0;
+        for (int i = 0; i < this.items.length; i++) {
+            if (items[i].fieldName.equals(name)) {
+                return i;
+            }
+        }
+        throw new NoSuchElementException("No such field name.");
+
     }
 
     /**
@@ -133,7 +156,11 @@ public class TupleDesc implements Serializable {
      */
     public int getSize() {
         // some code goes here
-        return 0;
+        int size = 0;
+        for (TDItem field : this.items) {
+            size += field.fieldType.getLen();
+        }
+        return size;
     }
 
     /**
@@ -148,7 +175,33 @@ public class TupleDesc implements Serializable {
      */
     public static TupleDesc merge(TupleDesc td1, TupleDesc td2) {
         // some code goes here
-        return null;
+        Type[] fieldType = new Type[td1.numFields() + td2.numFields()];
+        List<Type> typeList = getAllFieldsType(td1);
+        typeList.addAll(getAllFieldsType(td2));
+        typeList.toArray(fieldType);
+
+        String[] fieldName = new String[td1.numFields() + td2.numFields()];
+        List<String> stringList = getAllFieldsName(td1);
+        stringList.addAll(getAllFieldsName(td2));
+        stringList.toArray(fieldName);
+
+        return new TupleDesc(fieldType, fieldName);
+    }
+
+    private static List<String> getAllFieldsName(TupleDesc td) {
+        List<String> list = new LinkedList<>();
+        for (int i = 0; i < td.numFields(); i++) {
+            list.add(td.getFieldName(i));
+        }
+        return list;
+    }
+
+    private static List<Type> getAllFieldsType(TupleDesc td) {
+        List<Type> list = new LinkedList<>();
+        for (int i = 0; i < td.numFields(); i++) {
+            list.add(td.getFieldType(i));
+        }
+        return list;
     }
 
     /**
@@ -157,20 +210,34 @@ public class TupleDesc implements Serializable {
      * and if the i-th type in this TupleDesc is equal to the i-th type in o
      * for every i.
      * 
-     * @param o
+     * @param td
      *            the Object to be compared for equality with this TupleDesc.
      * @return true if the object is equal to this TupleDesc.
      */
 
-    public boolean equals(Object o) {
+    public boolean equals(Object td) {
         // some code goes here
-        return false;
+        if (!this.getClass().isInstance(td) || td == null) {
+            return false;
+        }
+        TupleDesc tupleDesc = (TupleDesc) td;
+        if (this.numFields() != tupleDesc.numFields()) return false;
+        for (int i = 0; i < this.numFields(); i++) {
+            if (this.getFieldType(i) != tupleDesc.getFieldType(i)) return false;
+        }
+        return true;
     }
 
     public int hashCode() {
         // If you want to use TupleDesc as keys for HashMap, implement this so
         // that equal objects have equals hashCode() results
-        throw new UnsupportedOperationException("unimplemented");
+        int hashcode = 0;
+        List<String> names = getAllFieldsName(this);
+        for (String str : names) {
+            hashcode += str.hashCode();
+        }
+        return hashcode;
+        // throw new UnsupportedOperationException("unimplemented");
     }
 
     /**
@@ -182,6 +249,10 @@ public class TupleDesc implements Serializable {
      */
     public String toString() {
         // some code goes here
-        return "";
+        StringBuilder stringBuilder = new StringBuilder();
+        for (int i = 0; i < this.numFields(); i++) {
+            stringBuilder.append("\"" + this.getFieldType(i) + "\"" + "(" + this.getFieldName(i) + ")  ");
+        }
+        return stringBuilder.toString();
     }
 }

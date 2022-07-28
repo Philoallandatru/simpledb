@@ -6,6 +6,7 @@ import simpledb.common.Debug;
 import simpledb.common.Catalog;
 import simpledb.transaction.TransactionId;
 
+import java.lang.reflect.Array;
 import java.util.*;
 import java.io.*;
 
@@ -73,8 +74,7 @@ public class HeapPage implements Page {
     */
     private int getNumTuples() {        
         // some code goes here
-        return 0;
-
+        return (int) Math.floor((BufferPool.getPageSize() * 8.0) / (td.getSize() * 8.0 + 1.0));
     }
 
     /**
@@ -84,7 +84,7 @@ public class HeapPage implements Page {
     private int getHeaderSize() {        
         
         // some code goes here
-        return 0;
+        return (int) Math.ceil(getNumTuples() / 8.0);
                  
     }
     
@@ -118,7 +118,7 @@ public class HeapPage implements Page {
      */
     public HeapPageId getId() {
     // some code goes here
-    throw new UnsupportedOperationException("implement this");
+        return this.pid;
     }
 
     /**
@@ -288,7 +288,13 @@ public class HeapPage implements Page {
      */
     public int getNumEmptySlots() {
         // some code goes here
-        return 0;
+        int emptySlot = 0;
+        for (int i = 0; i < this.numSlots; i++) {
+            if (!this.isSlotUsed(i)) {
+                emptySlot += 1;
+            }
+        }
+        return emptySlot;
     }
 
     /**
@@ -296,7 +302,10 @@ public class HeapPage implements Page {
      */
     public boolean isSlotUsed(int i) {
         // some code goes here
-        return false;
+        int byteNum = i / 8;
+        byte b = this.header[byteNum];
+        int offset = i % 8;
+        return ((b >> offset) & 1) == 1;
     }
 
     /**
@@ -313,7 +322,13 @@ public class HeapPage implements Page {
      */
     public Iterator<Tuple> iterator() {
         // some code goes here
-        return null;
+        ArrayList<Tuple> usedTuple = new ArrayList<>();
+        for (int i = 0; i < this.numSlots; i++) {
+            if (isSlotUsed(i)) {
+                usedTuple.add(this.tuples[i]);
+            }
+        }
+        return usedTuple.iterator();
     }
 
 }
