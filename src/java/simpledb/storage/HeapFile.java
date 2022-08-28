@@ -7,7 +7,7 @@ import simpledb.common.Permissions;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
-import javax.xml.crypto.Data;
+import javax.swing.plaf.IconUIResource;
 import java.io.*;
 import java.util.*;
 
@@ -109,6 +109,14 @@ public class HeapFile implements DbFile {
     public void writePage(Page page) throws IOException {
         // some code goes here
         // not necessary for lab1
+        int pageNo = page.getId().getPageNumber();
+        int offset = BufferPool.getPageSize() * pageNo;
+        byte[] pageData = page.getPageData();
+        RandomAccessFile raf = new RandomAccessFile(file, "rw");
+        raf.seek(offset);
+        raf.write(pageData);
+        raf.close();
+        page.markDirty(false, null);
     }
 
     /**
@@ -123,7 +131,34 @@ public class HeapFile implements DbFile {
     public List<Page> insertTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
         // some code goes here
-        return null;
+
+        int tableId = getId();
+        List<Page> result = new LinkedList<>();
+        /* choose a page with empty slot */
+        for (int i = 0; i < numPages(); i++) {
+            HeapPage readPage = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(tableId, i), Permissions.READ_ONLY);
+            /* if there are empty slots, insert into it */
+            if (readPage.getNumEmptySlots() > 0) {
+                HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(tableId, i), Permissions.READ_WRITE);
+                page.insertTuple(t);
+
+                /* mark dirty */
+                page.markDirty(true, tid);
+                result.add(page);
+                return result;
+            }
+        }
+        /* no empty pages, need to create new page */
+        HeapPageId pageId = new HeapPageId(tableId, numPages());
+        HeapPage page = new HeapPage(pageId, HeapPage.createEmptyPageData());
+        t.setRecordId(new RecordId(pageId, t.getRecordId().getTupleNumber()));
+        page.insertTuple(t);
+
+        /* should I mark it dirty? */
+        page.markDirty(true, tid);
+        writePage(page);
+        result.add(page);
+        return result;
         // not necessary for lab1
     }
 
@@ -131,7 +166,16 @@ public class HeapFile implements DbFile {
     public ArrayList<Page> deleteTuple(TransactionId tid, Tuple t) throws DbException,
             TransactionAbortedException {
         // some code goes here
-        return null;
+        ArrayList<Page> result = new ArrayList<>();
+        HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, t.getRecordId().getPageId(), Permissions.READ_WRITE);
+        try {
+            page.deleteTuple(t);
+        } catch (DbException e) {
+            return result;
+        }
+        page.markDirty(true, tid);
+        result.add(page);
+        return result;
         // not necessary for lab1
     }
 
@@ -171,34 +215,44 @@ public class HeapFile implements DbFile {
 
         @Override
         public void open() throws DbException, TransactionAbortedException {
-            this.pageNo = 0;
-            this.it = this.getPageTupleIterator(this.pageNo);
+            pageNo = 0;
+            it = getPageTupleIterator(pageNo);
+            if (it == null) {
+                throw new DbException("first page iterator is null.");
+            }
         }
 
         @Override
         public boolean hasNext() throws DbException, TransactionAbortedException {
-            if (this.it == null) return false;
-            return !((this.pageNo >= this.heapFile.numPages())
-                    || (this.pageNo == this.heapFile.numPages() - 1 && !this.it.hasNext()));
+            if (it == null) return false;
+            if (pageNo >= heapFile.numPages() || pageNo == heapFile.numPages() - 1 && !it.hasNext()) return false;
+            return true;
         }
 
         @Override
         public Tuple next() throws DbException, TransactionAbortedException, NoSuchElementException {
-            if (this.it == null) {
+            if (it == null) {
                 throw new NoSuchElementException("Iterator is null.");
             }
             /* if not reaching the last page  */
-            if (this.hasNext()) {
+            if (hasNext()) {
                 /* if not reaching the end of this page */
-                if (this.it.hasNext()) {
-                    return this.it.next();
-                } else {
-                    /* update page number and iterator */
-                    this.pageNo += 1;
-                    this.it = getPageTupleIterator(this.pageNo);
+                if (it.hasNext()) {
                     return it.next();
+                } else {
+                   /* update page number and iterator */
+                    while (true) {
+                        pageNo += 1;
+                        if (pageNo >= heapFile.numPages()) {
+                            throw new DbException("Reach the end");
+                        }
+                        it = getPageTupleIterator(pageNo);
+                        if (!it.hasNext()) continue;
+                        else return it.next();
+                    }
                 }
             } else {
+//                return null;
                 throw new NoSuchElementException("Reach the end.");
             }
         }

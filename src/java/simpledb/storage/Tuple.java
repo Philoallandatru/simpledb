@@ -111,9 +111,9 @@ public class Tuple implements Serializable {
         // some code goes here
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < this.tupleDesc.numFields() - 1; i++) {
-            sb.append(this.tupleDesc.getFieldName(i)).append("  ");
+            sb.append(this.tupleDesc.getFieldName(i)).append(": " + this.getField(i)).append("  ");
         }
-        sb.append(this.tupleDesc.getFieldName(this.tupleDesc.numFields()- 1)).append("\n");
+        sb.append(this.tupleDesc.getFieldName(this.tupleDesc.numFields()- 1)).append(": " + this.getField(tupleDesc.numFields()-1)).append("\n");
         return sb.toString();
     }
 

@@ -7,10 +7,8 @@ import simpledb.common.DeadlockException;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
-import javax.xml.crypto.Data;
 import java.io.*;
 
-import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -90,12 +88,13 @@ public class BufferPool {
             /* this page not in buffer, get it from database */
             DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
             Page page = dbFile.readPage(pid);
-            /* if buffer is full, evict page in buffer */
-            if (this.pages.size() > this.numPages) {
 
-            }
+            /* if this page not in that file return null */
+            if (page == null) return null;
+
+            /* if buffer is full, evict page in buffer */
             this.pages.put(pid, page);
-            return this.pages.get(pid);
+            return page;
         }
 //        throw new TransactionAbortedException();
     }
@@ -161,7 +160,12 @@ public class BufferPool {
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
+        /* find the table */
+        DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
+        /* insert the tuple */
+        dbFile.insertTuple(tid, t);
         // not necessary for lab1
+
     }
 
     /**
@@ -180,6 +184,11 @@ public class BufferPool {
     public  void deleteTuple(TransactionId tid, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
+        HeapPage page = (HeapPage) getPage(tid, t.getRecordId().getPageId(), Permissions.READ_WRITE);
+        if (page != null) {
+            page.deleteTuple(t);
+        }
+
         // not necessary for lab1
     }
 
