@@ -282,6 +282,7 @@ public class HeapPage implements Page {
             if (!isSlotUsed(i)) {
                 tuples[i] = t;
                 /* set this slot used */
+//                System.out.println("mark slot " + i + " used.");
                 markSlotUsed(i, true);
                 /* update the tuple information to current page and tuple number */
                 tuples[i].setRecordId(new RecordId(pid, i));
@@ -348,9 +349,9 @@ public class HeapPage implements Page {
         byte b = header[byteNum];
         int offset = i % 8;
         if (value) {
-            header[byteNum] = (byte) (b + Math.pow(2, offset));
+            header[byteNum] = (byte) (b + (1 << offset));
         } else {
-            header[byteNum] = (byte) (b - Math.pow(2, offset));
+            header[byteNum] = (byte) (b - (1 << offset));
         }
     }
 
@@ -366,6 +367,7 @@ public class HeapPage implements Page {
                 usedTuple.add(this.tuples[i]);
             }
         }
+//        System.out.println("used slot in this page: " + usedTuple.size() );
         return usedTuple.iterator();
     }
 

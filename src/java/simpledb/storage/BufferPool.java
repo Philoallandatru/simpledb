@@ -3,12 +3,14 @@ package simpledb.storage;
 import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
-import simpledb.common.DeadlockException;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
 
+import java.util.Deque;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -36,18 +38,20 @@ public class BufferPool {
 
     /** map page_id to pages, if
      */
+    private final Deque<PageId> doublyDeque;
     private final ConcurrentMap<PageId, Page> pages;
     private final int numPages;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
-     * @param numPages maximum number of pages in this buffer pool.
+     * @param numPages    maximum number of pages in this buffer pool.
      */
     public BufferPool(int numPages) {
         // some code goes here
         this.numPages = numPages;
         this.pages = new ConcurrentHashMap<>();
+        this.doublyDeque = new LinkedList<>();
     }
     
     public static int getPageSize() {
@@ -83,6 +87,8 @@ public class BufferPool {
         throws TransactionAbortedException, DbException {
         // some code goes here
         if (this.pages.containsKey(pid)) {
+            doublyDeque.remove(pid);
+            doublyDeque.push(pid);
             return this.pages.get(pid);
         } else {
             /* this page not in buffer, get it from database */
@@ -92,8 +98,11 @@ public class BufferPool {
             /* if this page not in that file return null */
             if (page == null) return null;
 
-            /* if buffer is full, evict page in buffer */
-            this.pages.put(pid, page);
+            if (pages.size() > numPages) {
+                evictPage();
+            }
+            pages.put(pid, page);
+            doublyDeque.push(pid);
             return page;
         }
 //        throw new TransactionAbortedException();
@@ -163,7 +172,11 @@ public class BufferPool {
         /* find the table */
         DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
         /* insert the tuple */
-        dbFile.insertTuple(tid, t);
+        List<Page> dirtyPages = dbFile.insertTuple(tid, t);
+        for (Page page : dirtyPages) {
+            page.markDirty(true, tid);
+            pages.put(page.getId(), page);
+        }
         // not necessary for lab1
 
     }
@@ -184,9 +197,10 @@ public class BufferPool {
     public  void deleteTuple(TransactionId tid, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
-        HeapPage page = (HeapPage) getPage(tid, t.getRecordId().getPageId(), Permissions.READ_WRITE);
-        if (page != null) {
-            page.deleteTuple(t);
+        int tableId = t.getRecordId().getPageId().getTableId();
+        List<Page> dirtyPages = Database.getCatalog().getDatabaseFile(tableId).deleteTuple(tid, t);
+        for (Page page : dirtyPages) {
+            pages.put(page.getId(), page);
         }
 
         // not necessary for lab1
@@ -214,6 +228,8 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+        pages.remove(pid);
+        doublyDeque.remove(pid);
     }
 
     /**
@@ -223,6 +239,9 @@ public class BufferPool {
     private synchronized  void flushPage(PageId pid) throws IOException {
         // some code goes here
         // not necessary for lab1
+        int tableId = pid.getTableId();
+        DbFile tableFile = Database.getCatalog().getDatabaseFile(tableId);
+        tableFile.writePage(pages.get(pid));
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -239,6 +258,18 @@ public class BufferPool {
     private synchronized  void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
+        /* find the least recently used page */
+
+        PageId lastPage = doublyDeque.removeLast();
+
+        /* flush this page to disk */
+        try {
+            flushPage(lastPage);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to flush pages.");
+        }
+        pages.remove(lastPage);
+
     }
 
 }
