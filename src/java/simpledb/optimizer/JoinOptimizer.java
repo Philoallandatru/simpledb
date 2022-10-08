@@ -130,7 +130,7 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            return cost1 + card2 * cost2 + card1 * card2;
         }
     }
 
@@ -175,8 +175,54 @@ public class JoinOptimizer {
                                                    boolean t2pkey, Map<String, TableStats> stats,
                                                    Map<String, Integer> tableAliasToId) {
         int card = 1;
+        if (joinOp == Predicate.Op.EQUALS) {
+            if (t1pkey && !t2pkey)  {
+                card = card2;
+            } else if (!t1pkey && t2pkey) {
+                card = card1;
+            } else if (t1pkey && t2pkey) {
+                card = Math.max(card1, card2);
+            } else {
+                card = Math.min(card1, card2);
+            }
+        } else if (joinOp == Predicate.Op.NOT_EQUALS) {
+            if (t1pkey && !t2pkey) {
+                card = card1 * card2 - card2;
+            } else if (!t1pkey && t2pkey) {
+                card = card1 * card2 - card1;
+            } else if (t1pkey && t2pkey) {
+                card = card1 * card2 - Math.min(card1, card2);
+            } else {
+                card = card1 * card2 - Math.max(card, card2);
+            }
+        } else {
+            card = (int) (0.3 * card1 * card2);
+        }
+        return card > 0 ? card : 1;
         // some code goes here
-        return card <= 0 ? 1 : card;
+        /*
+        TableStats stats1 = stats.get(table1Alias);
+        TableStats stats2 = stats.get(table2Alias);
+        TupleDesc td1 = Database.getCatalog().getTupleDesc(tableAliasToId.get(table1Alias));
+        TupleDesc td2 = Database.getCatalog().getTupleDesc(tableAliasToId.get(table2Alias));
+        int field1Id;
+        int field2Id;
+        for (int i = 0; i < td1.numFields(); i++)
+            if (td1.getFieldName(i).equals(field1PureName))  field1Id = i;
+
+        for (int i = 0; i < td2.numFields(); i++)
+            if (td2.getFieldName(i).equals(field1PureName)) field2Id = i;
+
+
+        if (joinOp == Predicate.Op.EQUALS) {
+
+        } else if (joinOp == Predicate.Op.NOT_EQUALS) {
+
+        } else {
+
+        }
+         */
+
     }
 
     /**
@@ -238,7 +284,32 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
-        return joins;
+        PlanCache planCache = new PlanCache();
+        CostCard bestCost = new CostCard();
+        int size = joins.size();
+        for (int i = 1; i <= size; i++) {
+            Set<Set<LogicalJoinNode>> allSubsets = enumerateSubsets(joins, i);
+            for (Set<LogicalJoinNode> joinSubset : allSubsets) {
+                double bestCostSoFar = Double.MAX_VALUE;
+                for (LogicalJoinNode joinToRemove : joinSubset) {
+                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, joinToRemove, joinSubset, bestCostSoFar, planCache);
+                    if (costCard != null) {
+                        bestCost = costCard;
+                        bestCostSoFar = costCard.cost;
+                    }
+                }
+                if (bestCostSoFar != Double.MAX_VALUE) {
+                    planCache.addPlan(joinSubset, bestCost.cost, bestCost.card, bestCost.plan);
+                    System.out.println("Size[" + i + "]: " + bestCost.plan);
+                }
+
+            }
+        }
+        if (explain) {
+            printJoins(bestCost.plan, planCache, stats, filterSelectivities);
+        }
+        return bestCost.plan;
+
     }
 
     // ===================== Private Methods =================================

@@ -1,13 +1,14 @@
 package simpledb.optimizer;
 
 import simpledb.common.Database;
+import simpledb.common.DbException;
 import simpledb.common.Type;
 import simpledb.execution.Predicate;
 import simpledb.execution.SeqScan;
 import simpledb.storage.*;
-import simpledb.transaction.Transaction;
+import simpledb.transaction.TransactionAbortedException;
+import simpledb.transaction.TransactionId;
 
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,9 +22,29 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class TableStats {
 
+    static class IntFieldStatus {
+
+        IntFieldStatus(int value) {
+            max = value;
+            min = value;
+        }
+        private int max;
+        private int min;
+    }
+
     private static final ConcurrentMap<String, TableStats> statsMap = new ConcurrentHashMap<>();
 
+    private final ConcurrentMap<Integer, IntHistogram> intHists;
+    private final ConcurrentMap<Integer, StringHistogram> stringHists;
+
+
+
     static final int IOCOSTPERPAGE = 1000;
+    private int size = 0;
+    private final int numPages;
+    private final int ioCostPerPage;
+    private final TupleDesc td;
+
 
     public static TableStats getTableStats(String tablename) {
         return statsMap.get(tablename);
@@ -87,6 +108,82 @@ public class TableStats {
         // necessarily have to (for example) do everything
         // in a single scan of the table.
         // some code goes here
+        this.ioCostPerPage = ioCostPerPage;
+        ConcurrentMap<Integer, IntFieldStatus> intFieldStatus = new ConcurrentHashMap<>();
+        stringHists = new ConcurrentHashMap<>();
+        intHists = new ConcurrentHashMap<>();
+
+        HeapFile table = (HeapFile) Database.getCatalog().getDatabaseFile(tableid);
+        TransactionId tid = new TransactionId();
+        td = table.getTupleDesc();
+        DbFileIterator tableIt = table.iterator(tid);
+        Tuple t;
+        numPages = table.numPages();
+        SeqScan scan = new SeqScan(tid, tableid);
+
+        try {
+            scan.open();
+        } catch (DbException | TransactionAbortedException e) {
+            throw new RuntimeException(e);
+        }
+
+        while (true) {
+            try {
+                if (!scan.hasNext()) break;
+                t = scan.next();
+                for (int i = 0; i < td.numFields(); i++) {
+                    if (td.getFieldType(i) == Type.INT_TYPE) {
+                        int value = ((IntField) t.getField(i)).getValue();
+                        if (intFieldStatus.containsKey(i)) {
+                            IntFieldStatus status = intFieldStatus.get(i);
+                            if (value > status.max) status.max = value;
+                            if (value < status.min) status.min = value;
+                        } else {
+                            IntFieldStatus status = new IntFieldStatus(value);
+                            intFieldStatus.put(i, status);
+                        }
+                    }
+                }
+                size += 1;
+            } catch (DbException | TransactionAbortedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        for (int i = 0; i<td.numFields(); i++)  {
+            if (td.getFieldType(i) == Type.INT_TYPE) {
+                IntFieldStatus ifs = intFieldStatus.get(i);
+                intHists.put(i, new IntHistogram(NUM_HIST_BINS ,ifs.min, ifs.max));
+            } else {
+                stringHists.put(i, new StringHistogram(NUM_HIST_BINS));
+            }
+        }
+
+        try {
+            scan.rewind();
+        } catch (DbException | TransactionAbortedException e) {
+            throw new RuntimeException(e);
+        }
+
+        while (true) {
+            try {
+                if (!scan.hasNext())  break;
+                t = scan.next();
+                for (int i = 0; i < td.numFields(); i++) {
+                    if (td.getFieldType(i) == Type.INT_TYPE) {
+                        int value = ((IntField)t.getField(i)).getValue();
+                        intHists.get(i).addValue(value);
+                    } else {
+                        String value = ((StringField)t.getField(i)).getValue();
+                        stringHists.get(i).addValue(value);
+                    }
+                }
+            } catch (DbException | TransactionAbortedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        scan.close();
+
     }
 
     /**
@@ -103,7 +200,7 @@ public class TableStats {
      */
     public double estimateScanCost() {
         // some code goes here
-        return 0;
+        return numPages * ioCostPerPage * 2;
     }
 
     /**
@@ -117,7 +214,7 @@ public class TableStats {
      */
     public int estimateTableCardinality(double selectivityFactor) {
         // some code goes here
-        return 0;
+        return (int) (totalTuples() * selectivityFactor);
     }
 
     /**
@@ -132,7 +229,11 @@ public class TableStats {
      * */
     public double avgSelectivity(int field, Predicate.Op op) {
         // some code goes here
-        return 1.0;
+        if (td.getFieldType(field).equals(Type.INT_TYPE)) {
+            return intHists.get(field).avgSelectivity();
+        } else {
+            return stringHists.get(field).avgSelectivity();
+        }
     }
 
     /**
@@ -150,7 +251,14 @@ public class TableStats {
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
         // some code goes here
-        return 1.0;
+        Type type = td.getFieldType(field);
+        if (type == Type.STRING_TYPE) {
+            String object = ((StringField)constant).getValue();
+            return stringHists.get(field).estimateSelectivity(op, object);
+        } else {
+            int object = ((IntField)constant).getValue();
+            return intHists.get(field).estimateSelectivity(op, object);
+        }
     }
 
     /**
@@ -158,7 +266,7 @@ public class TableStats {
      * */
     public int totalTuples() {
         // some code goes here
-        return 0;
+        return size;
     }
 
 }

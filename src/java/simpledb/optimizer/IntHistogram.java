@@ -2,10 +2,20 @@ package simpledb.optimizer;
 
 import simpledb.execution.Predicate;
 
+
 /** A class to represent a fixed-width histogram over a single integer-based field.
  */
 public class IntHistogram {
 
+
+
+    private final int buckets;
+    private final int min;
+    private final int max;
+    private final double step;
+    private final long[] counts;
+
+    private int nTups;
     /**
      * Create a new IntHistogram.
      * 
@@ -24,6 +34,13 @@ public class IntHistogram {
      */
     public IntHistogram(int buckets, int min, int max) {
     	// some code goes here
+        this.buckets = buckets;
+        nTups = 0;
+        this.min = min;
+        this.max = max;
+        step = Math.max(1, (max * 1.0 - min) / buckets);
+        counts = new long[buckets];
+
     }
 
     /**
@@ -32,6 +49,18 @@ public class IntHistogram {
      */
     public void addValue(int v) {
     	// some code goes here
+        if (v < min || v > max) return;
+        int index = getIndex(v);
+        long count = counts[index];
+        counts[index] = count + 1;
+        nTups += 1;
+    }
+
+    private int getIndex(int v) {
+        int index = (int) Math.floor((v - min) / step);
+        if (v >= max) index = buckets - 1;
+        if (v <= min) index = 0;
+        return index;
     }
 
     /**
@@ -46,9 +75,45 @@ public class IntHistogram {
      */
     public double estimateSelectivity(Predicate.Op op, int v) {
 
+        int index = getIndex(v);
+        long equalCount = counts[index];
+
+        if (op == Predicate.Op.EQUALS) {
+            if (v > max || v < min) return 0;
+            return equalCount / (nTups * step);
+        }
+        if (op == Predicate.Op.NOT_EQUALS) {
+            if (v > max || v < min) return 1;
+            return (nTups - equalCount * 1.0) / (nTups * step);
+        }
+
+        long largerCount = 0;
+        int i = index + 1;
+        while (i < buckets) {
+            largerCount += counts[i++];
+        }
+
+        long lessCount = nTups - (largerCount + equalCount);
+
+        if (op == Predicate.Op.GREATER_THAN || op == Predicate.Op.GREATER_THAN_OR_EQ) {
+            if (v < min) return 1.0;
+            if (v > max) return 0;
+            if (op == Predicate.Op.GREATER_THAN) return largerCount * 1.0 / (nTups * step);
+            return (largerCount + equalCount*((min+step*(index+1)-v) / step)) / (nTups * step);
+        }
+
+        if (op == Predicate.Op.LESS_THAN_OR_EQ || op == Predicate.Op.LESS_THAN) {
+            if (v > max) return 1.0;
+            if (v < min) return 0;
+            if (op == Predicate.Op.LESS_THAN) return lessCount * 1.0 / (nTups * step);
+            return (lessCount + 1.0 * equalCount*((v + step -(min+step*index)) / step)) / (nTups * step);
+        }
     	// some code goes here
+
         return -1.0;
     }
+
+
     
     /**
      * @return
@@ -61,7 +126,7 @@ public class IntHistogram {
     public double avgSelectivity()
     {
         // some code goes here
-        return 1.0;
+        return  1.0 ;
     }
     
     /**
@@ -69,6 +134,11 @@ public class IntHistogram {
      */
     public String toString() {
         // some code goes here
-        return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < buckets; i++) {
+            sb.append("[").append(min).append(step * i).append("~").append(min).append(step * (i + 1)).append("]:").append(counts[i]).append("\t");
+        }
+        sb.append("\n");
+        return sb.toString();
     }
 }

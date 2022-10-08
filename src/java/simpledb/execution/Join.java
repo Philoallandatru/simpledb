@@ -50,8 +50,7 @@ public class Join extends Operator {
     public String getJoinField1Name() {
         // some code goes here
         StringBuilder sb = new StringBuilder();
-        String field1Name = this.child1.getTupleDesc().getFieldName(this.p.getField1());
-        return field1Name;
+        return child1.getTupleDesc().getFieldName(p.getField1());
     }
 
     /**
@@ -61,8 +60,7 @@ public class Join extends Operator {
      * */
     public String getJoinField2Name() {
         // some code goes here
-        String field2Name = this.child2.getTupleDesc().getFieldName(this.p.getField2());
-        return null;
+        return child2.getTupleDesc().getFieldName(p.getField2());
     }
 
     /**
@@ -71,16 +69,16 @@ public class Join extends Operator {
      */
     public TupleDesc getTupleDesc() {
         // some code goes here
-        return TupleDesc.merge(this.child1.getTupleDesc(), this.child2.getTupleDesc());
+        return TupleDesc.merge(child1.getTupleDesc(), child2.getTupleDesc());
     }
 
     public void open() throws DbException, NoSuchElementException,
             TransactionAbortedException {
         // some code goes here
         super.open();
-        this.child1.open();
-        this.child2.open();
-        if (child1.hasNext()) this.currChild1 = child1.next();
+        child1.open();
+        child2.open();
+        if (child1.hasNext()) currChild1 = child1.next();
     }
 
     public void close() {
@@ -138,8 +136,6 @@ public class Join extends Operator {
             }
         }
         return null;
-
-
     }
 
     private boolean noRemainingTuples() throws TransactionAbortedException, DbException {

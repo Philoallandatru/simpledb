@@ -7,7 +7,6 @@ import simpledb.common.Permissions;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
-import javax.swing.plaf.IconUIResource;
 import java.io.*;
 import java.util.*;
 
