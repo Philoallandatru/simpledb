@@ -14,4 +14,11 @@ public class CostCard {
     public int card;
     /** The optimal subplan */
     public List<LogicalJoinNode> plan;
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Plan(").append(plan).append(")").append("\t").append("Cost(").append(cost).append(")").append("\t").append("card(").append(")");
+        return sb.toString();
+    }
 }

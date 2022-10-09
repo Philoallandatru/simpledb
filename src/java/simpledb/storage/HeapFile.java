@@ -2,7 +2,6 @@ package simpledb.storage;
 
 import simpledb.common.Database;
 import simpledb.common.DbException;
-import simpledb.common.Debug;
 import simpledb.common.Permissions;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
@@ -68,7 +67,7 @@ public class HeapFile implements DbFile {
      */
     public TupleDesc getTupleDesc() {
         // some code goes here
-        return this.tupleDesc;
+        return tupleDesc;
     }
 
     // see DbFile.java for javadocs
@@ -186,14 +185,16 @@ public class HeapFile implements DbFile {
 
     static class HeapFileTupleIterator implements DbFileIterator {
         private Iterator<Tuple> it;
-        private HeapFile heapFile;
-        private TransactionId tid;
+        private final HeapFile heapFile;
+        private final TransactionId tid;
         private int pageNo;
+        private final int pageNums;
 
         HeapFileTupleIterator(HeapFile heapFile, TransactionId tid) {
             this.heapFile = heapFile;
             this.tid = tid;
             this.pageNo = 0;
+            this.pageNums = heapFile.numPages();
         }
 
         /**
@@ -202,7 +203,7 @@ public class HeapFile implements DbFile {
          * @return
          */
         private Iterator<Tuple> getPageTupleIterator(int pageNo) throws TransactionAbortedException, DbException {
-            if (pageNo >= 0 && pageNo < heapFile.numPages()) {
+            if (pageNo >= 0 && pageNo < pageNums) {
                 /* the heapFile id is table id */
                 HeapPageId heapPageId = new HeapPageId(this.heapFile.getId(), pageNo);
                 HeapPage heapPage = (HeapPage) Database.getBufferPool().getPage(this.tid, heapPageId, Permissions.READ_ONLY);
@@ -224,49 +225,39 @@ public class HeapFile implements DbFile {
         @Override
         public boolean hasNext() throws DbException, TransactionAbortedException {
             if (it == null) return false;
-            if (pageNo >= heapFile.numPages() || pageNo == heapFile.numPages() - 1 && !it.hasNext()) return false;
+            if (pageNo >= pageNums) return false;
+            if ((pageNo == pageNums - 1) && !it.hasNext()) return false;
+            if (!it.hasNext()) {
+                while (true) {
+                    pageNo += 1;
+                    if (pageNo >= pageNums) return false;
+                    it = getPageTupleIterator(pageNo);
+                    if (!it.hasNext()) {
+                        continue;
+                    } else {
+                        return true;
+                    }
+                }
+            }
             return true;
         }
 
         @Override
         public Tuple next() throws DbException, TransactionAbortedException, NoSuchElementException {
-            if (it == null) {
-                throw new NoSuchElementException("Iterator is null.");
-            }
-            /* if not reaching the last page  */
-            if (hasNext()) {
-                /* if not reaching the end of this page */
-                if (it.hasNext()) {
-                    return it.next();
-                } else {
-                   /* update page number and iterator */
-                    while (true) {
-                        pageNo += 1;
-                        if (pageNo >= heapFile.numPages()) {
-                            throw new DbException("Reach the end");
-                        }
-                        it = getPageTupleIterator(pageNo);
-                        if (!it.hasNext()) continue;
-                        else return it.next();
-                    }
-                }
-            } else {
-//                return null;
-                throw new NoSuchElementException("Reach the end.");
-            }
+            if (it == null) throw new NoSuchElementException("Iterator is null.");
+            return it.next();
         }
 
         @Override
         public void rewind() throws DbException, TransactionAbortedException {
-            this.pageNo = 0;
-            this.it = null;
-            this.open();
+            close();
+            open();
         }
 
         @Override
         public void close() {
-            this.pageNo = 0;
-            this.it = null;
+            pageNo = 0;
+            it = null;
         }
     }
 

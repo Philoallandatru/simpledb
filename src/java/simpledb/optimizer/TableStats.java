@@ -22,21 +22,12 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class TableStats {
 
-    static class IntFieldStatus {
 
-        IntFieldStatus(int value) {
-            max = value;
-            min = value;
-        }
-        private int max;
-        private int min;
-    }
 
     private static final ConcurrentMap<String, TableStats> statsMap = new ConcurrentHashMap<>();
 
     private final ConcurrentMap<Integer, IntHistogram> intHists;
     private final ConcurrentMap<Integer, StringHistogram> stringHists;
-
 
 
     static final int IOCOSTPERPAGE = 1000;
@@ -109,14 +100,21 @@ public class TableStats {
         // in a single scan of the table.
         // some code goes here
         this.ioCostPerPage = ioCostPerPage;
-        ConcurrentMap<Integer, IntFieldStatus> intFieldStatus = new ConcurrentHashMap<>();
         stringHists = new ConcurrentHashMap<>();
         intHists = new ConcurrentHashMap<>();
 
         HeapFile table = (HeapFile) Database.getCatalog().getDatabaseFile(tableid);
         TransactionId tid = new TransactionId();
         td = table.getTupleDesc();
-        DbFileIterator tableIt = table.iterator(tid);
+        int numFields = td.numFields();
+
+        int[] max = new int[numFields];
+        for (int i = 0; i < numFields; i++)
+            max[i] = Integer.MIN_VALUE;
+        int[] min = new int[numFields];
+        for (int i = 0; i < numFields; i++)
+            min[i] = Integer.MAX_VALUE;
+
         Tuple t;
         numPages = table.numPages();
         SeqScan scan = new SeqScan(tid, tableid);
@@ -131,17 +129,11 @@ public class TableStats {
             try {
                 if (!scan.hasNext()) break;
                 t = scan.next();
-                for (int i = 0; i < td.numFields(); i++) {
+                for (int i = 0; i < numFields; i++) {
                     if (td.getFieldType(i) == Type.INT_TYPE) {
                         int value = ((IntField) t.getField(i)).getValue();
-                        if (intFieldStatus.containsKey(i)) {
-                            IntFieldStatus status = intFieldStatus.get(i);
-                            if (value > status.max) status.max = value;
-                            if (value < status.min) status.min = value;
-                        } else {
-                            IntFieldStatus status = new IntFieldStatus(value);
-                            intFieldStatus.put(i, status);
-                        }
+                        if (value > max[i]) max[i] = value;
+                        if (value < min[i]) min[i] = value;
                     }
                 }
                 size += 1;
@@ -150,10 +142,9 @@ public class TableStats {
             }
         }
 
-        for (int i = 0; i<td.numFields(); i++)  {
+        for (int i = 0; i < numFields; i++)  {
             if (td.getFieldType(i) == Type.INT_TYPE) {
-                IntFieldStatus ifs = intFieldStatus.get(i);
-                intHists.put(i, new IntHistogram(NUM_HIST_BINS ,ifs.min, ifs.max));
+                intHists.put(i, new IntHistogram(NUM_HIST_BINS, min[i], max[i]));
             } else {
                 stringHists.put(i, new StringHistogram(NUM_HIST_BINS));
             }
@@ -169,7 +160,7 @@ public class TableStats {
             try {
                 if (!scan.hasNext())  break;
                 t = scan.next();
-                for (int i = 0; i < td.numFields(); i++) {
+                for (int i = 0; i < numFields; i++) {
                     if (td.getFieldType(i) == Type.INT_TYPE) {
                         int value = ((IntField)t.getField(i)).getValue();
                         intHists.get(i).addValue(value);

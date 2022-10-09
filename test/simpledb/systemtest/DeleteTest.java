@@ -51,7 +51,6 @@ public class DeleteTest extends FilterBase {
             assert result == createdTuples.size();
             expectedTuples = new ArrayList<>();
         }
-        SystemTestUtil.matchTuples(table, tid, expectedTuples);
         return result;
     }
 

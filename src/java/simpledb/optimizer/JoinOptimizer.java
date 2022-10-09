@@ -3,7 +3,6 @@ package simpledb.optimizer;
 import simpledb.common.Database;
 import simpledb.ParsingException;
 import simpledb.execution.*;
-import simpledb.storage.TupleDesc;
 
 import java.util.*;
 
@@ -130,7 +129,7 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return cost1 + card2 * cost2 + card1 * card2;
+            return cost1 + card1 * cost2 + card1 * card2;
         }
     }
 
@@ -185,6 +184,7 @@ public class JoinOptimizer {
             } else {
                 card = Math.min(card1, card2);
             }
+            /*
         } else if (joinOp == Predicate.Op.NOT_EQUALS) {
             if (t1pkey && !t2pkey) {
                 card = card1 * card2 - card2;
@@ -195,10 +195,13 @@ public class JoinOptimizer {
             } else {
                 card = card1 * card2 - Math.max(card, card2);
             }
+
+
+             */
         } else {
             card = (int) (0.3 * card1 * card2);
         }
-        return card > 0 ? card : 1;
+        return card;
         // some code goes here
         /*
         TableStats stats1 = stats.get(table1Alias);
@@ -222,7 +225,6 @@ public class JoinOptimizer {
 
         }
          */
-
     }
 
     /**
@@ -292,15 +294,17 @@ public class JoinOptimizer {
             for (Set<LogicalJoinNode> joinSubset : allSubsets) {
                 double bestCostSoFar = Double.MAX_VALUE;
                 for (LogicalJoinNode joinToRemove : joinSubset) {
+                    // System.out.println(">>>>>[size: " + i + "]" + " processing: " + joinSubset + " remove: " + joinToRemove );
                     CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, joinToRemove, joinSubset, bestCostSoFar, planCache);
                     if (costCard != null) {
                         bestCost = costCard;
                         bestCostSoFar = costCard.cost;
+                        // System.out.println("This is better. <<<<<<");
                     }
                 }
                 if (bestCostSoFar != Double.MAX_VALUE) {
                     planCache.addPlan(joinSubset, bestCost.cost, bestCost.card, bestCost.plan);
-                    System.out.println("Size[" + i + "]: " + bestCost.plan);
+                    // System.out.println("Size[" + i + "]: " + bestCost);
                 }
 
             }

@@ -97,7 +97,7 @@ public class SeqScan implements OpIterator {
 
     public void open() throws DbException, TransactionAbortedException {
         // some code goes here
-        this.iterator.open();
+        iterator.open();
     }
 
     /**
@@ -124,26 +124,26 @@ public class SeqScan implements OpIterator {
 
     public boolean hasNext() throws TransactionAbortedException, DbException {
         // some code goes here
-        if (this.iterator == null) return false;
-        return this.iterator.hasNext();
+        if (iterator == null) return false;
+        return iterator.hasNext();
     }
 
     public Tuple next() throws NoSuchElementException,
             TransactionAbortedException, DbException {
         // some code goes here
-        return this.iterator.next();
+        return iterator.next();
 
     }
 
     public void close() {
         // some code goes here
-        this.iterator.close();
+        iterator.close();
     }
 
     public void rewind() throws DbException, NoSuchElementException,
             TransactionAbortedException {
         // some code goes here
-        this.iterator.rewind();
+        iterator.rewind();
 
     }
 }
