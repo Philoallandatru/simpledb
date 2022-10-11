@@ -8,9 +8,7 @@ import simpledb.transaction.TransactionId;
 
 import java.io.*;
 
-import java.util.Deque;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -26,6 +24,81 @@ import java.util.concurrent.ConcurrentMap;
  * @Threadsafe, all fields are final
  */
 public class BufferPool {
+
+    enum LockType {
+        SLOCK, XLOCK
+    }
+    static class PageLock {
+        LockType lockType;
+        TransactionId tid;
+        PageId pageId;
+        boolean isPhase1;
+        List<TransactionId> sharedTxns;
+
+
+        PageLock(LockType type, TransactionId tid, PageId pageId) {
+            lockType = type;
+            this.tid = tid;
+            this.pageId = pageId;
+            isPhase1 = true;
+            sharedTxns = new LinkedList<>();
+        }
+    }
+    static class LockManager {
+        private final Map<PageId, PageLock> pageLocks;
+
+        public LockManager() {
+            pageLocks = new HashMap<>();
+        }
+
+        public void acquireLock(TransactionId tid ,PageId pageId, LockType type) {
+            // create a thread to do the request
+
+            // check if this pageId is in current lock state
+
+            // if there is shared lock, and acquires for a shared lock, granted
+
+
+            // if there is an exclusive lock, x-lock and s-lock should both wait
+
+
+        }
+
+        private void acquiresLockThread(TransactionId tid ,PageId pageId, LockType lockType) {
+            // if there is no such lock, create a lock with given type
+            if (!pageLocks.containsKey(pageId)) {
+                addLock(tid, pageId, lockType);
+                return;
+            }
+
+            PageLock pageLock = pageLocks.get(pageId);
+            TransactionId ownerTid = pageLock.tid;
+            LockType oldLockType = pageLock.lockType;
+
+            if (oldLockType == LockType.SLOCK || lockType == LockType.SLOCK) {
+                pageLock.sharedTxns.add(tid);
+                return;
+            }
+
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            addLock(tid, pageId, lockType);
+
+        }
+
+        private void addLock(TransactionId tid ,PageId pageId, LockType lockType) {
+            pageLocks.put(pageId, new PageLock(lockType, tid, pageId));
+            if (lockType == LockType.SLOCK) pageLocks.get(pageId).sharedTxns.add(tid);
+        }
+
+        public void releaseLock(TransactionId tid ,PageId pageId) {
+        }
+    }
+
     /** Bytes per page, including header. */
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
@@ -39,6 +112,8 @@ public class BufferPool {
     /** map page_id to pages, if
      */
     private final Deque<PageId> doublyDeque;
+
+    /* buffered pages */
     private final ConcurrentMap<PageId, Page> pages;
     private final int numPages;
 
@@ -86,10 +161,17 @@ public class BufferPool {
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
+
+        // check permission
+
+        // if read_only, acquires a shared lock
+
+        // if read_write, acquires an exclusive lock
+
         if (this.pages.containsKey(pid)) {
             doublyDeque.remove(pid);
             doublyDeque.push(pid);
-            return this.pages.get(pid);
+            return pages.get(pid);
         } else {
             /* this page not in buffer, get it from database */
             DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
