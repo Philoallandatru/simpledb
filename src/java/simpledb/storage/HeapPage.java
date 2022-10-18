@@ -2,7 +2,6 @@ package simpledb.storage;
 
 import simpledb.common.Database;
 import simpledb.common.DbException;
-import simpledb.common.Debug;
 import simpledb.common.Catalog;
 import simpledb.transaction.TransactionId;
 
@@ -121,7 +120,7 @@ public class HeapPage implements Page {
      */
     public HeapPageId getId() {
     // some code goes here
-        return this.pid;
+        return pid;
     }
 
     /**
@@ -286,6 +285,7 @@ public class HeapPage implements Page {
                 markSlotUsed(i, true);
                 /* update the tuple information to current page and tuple number */
                 tuples[i].setRecordId(new RecordId(pid, i));
+                dirty = true;
                 return;
             }
         }
@@ -309,7 +309,7 @@ public class HeapPage implements Page {
     public TransactionId isDirty() {
         // some code goes here
 	// Not necessary for lab1
-        if (!dirty) return null;
+        if (tid == null || !dirty) return null;
         return tid;
     }
 

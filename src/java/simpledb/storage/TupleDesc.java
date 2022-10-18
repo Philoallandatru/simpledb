@@ -79,9 +79,9 @@ public class TupleDesc implements Serializable {
      */
     public TupleDesc(Type[] typeAr) {
         // some code goes here
-        this.items = new TDItem[typeAr.length];
+        items = new TDItem[typeAr.length];
         for (int i = 0; i < typeAr.length; i++) {
-            this.items[i] = new TDItem(typeAr[i], "anonymous");
+            items[i] = new TDItem(typeAr[i], "anonymous");
         }
     }
 
@@ -90,7 +90,7 @@ public class TupleDesc implements Serializable {
      */
     public int numFields() {
         // some code goes here
-        return this.items.length;
+        return items.length;
     }
 
     /**
@@ -123,10 +123,10 @@ public class TupleDesc implements Serializable {
      */
     public Type getFieldType(int i) throws NoSuchElementException {
         // some code goes here
-        if (i < 0 || i > this.numFields() - 1) {
+        if (i < 0 || i >= this.numFields()) {
             throw new NoSuchElementException("Index Out of Range");
         } else {
-            return this.items[i].fieldType;
+            return items[i].fieldType;
         }
     }
 

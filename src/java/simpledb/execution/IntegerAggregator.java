@@ -1,12 +1,10 @@
 package simpledb.execution;
 
-import simpledb.common.DbException;
 import simpledb.common.Type;
 import simpledb.storage.Field;
 import simpledb.storage.IntField;
 import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
-import simpledb.transaction.TransactionAbortedException;
 
 import java.util.*;
 
@@ -24,10 +22,13 @@ public class IntegerAggregator implements Aggregator {
     private Tuple result;
     private int count;
     /* contains all the aggregated tuples of certain group, key is group field */
-    private Map<Field, Tuple> aggregates;
+    private final Map<Field, Tuple> aggregates;
 
     /* used to compute average and count, so you need the number of tuples in each group */
-    private Map<Field, Integer> groupCount;
+    private final Map<Field, Integer> groupCount;
+    private double avgTemp;
+    private final Map<Field, Double> groupAvgTemp;
+    private Field chosenField;
 
     /**
      * Aggregate constructor
@@ -50,10 +51,13 @@ public class IntegerAggregator implements Aggregator {
         this.gbfieldtype = gbfieldtype;
         this.afield = afield;
         this.what = what;
-        this.result = null;
-        this.count = 0;
-        this.aggregates = new HashMap<>();
-        this.groupCount = new HashMap<>();
+        result = null;
+        count = 0;
+        aggregates = new HashMap<>();
+        groupCount = new HashMap<>();
+        groupAvgTemp = new HashMap<>();
+        avgTemp = 0;
+        chosenField = null;
     }
 
     /**
@@ -64,17 +68,21 @@ public class IntegerAggregator implements Aggregator {
      *            the Tuple containing an aggregate field and a group-by field
      */
     public void mergeTupleIntoGroup(Tuple tup) {
+        Integer addedValue = ((IntField) tup.getField(afield)).getValue();
+        System.out.println("Current: " + result + " ->add " + addedValue + " count : " + count  +  " ->");
         // some code goes here
+        TupleDesc oldTd = tup.getTupleDesc();
         if (gbfield == Aggregator.NO_GROUPING) {
             if (result == null) {
-                Type fieldType = tup.getTupleDesc().getFieldType(afield);
-                String fieldName = tup.getTupleDesc().getFieldName(afield);
+                Type fieldType = oldTd.getFieldType(afield);
+                String fieldName = oldTd.getFieldName(afield);
                 TupleDesc td = new TupleDesc(new Type[]{fieldType}, new String[]{fieldName});
                 result = new Tuple(td);
                 if (what == Op.COUNT) {
                     result.setField(0, new IntField(1));
                 } else {
-                    result.setField(afield, tup.getField(afield));
+                    avgTemp = (double) addedValue;
+                    result.setField(0, tup.getField(afield));
                 }
                 count = 1;
             } else {
@@ -84,18 +92,20 @@ public class IntegerAggregator implements Aggregator {
                 count += 1;
             }
         } else {
-            int gb = 0;
+            // aggregate field index in tuple desc is 1
             int agg = 1;
             if (aggregates.isEmpty()) {
                 addNewGroupByTuple(tup);
             } else {
                 /* note that IntField has already implemented equals method, so use hashmap here  */
+                // check if the input tuple belongs to any existing group  or not
                 Field groupByField = tup.getField(gbfield);
                 if (aggregates.containsKey(groupByField)) {
                     Tuple tuple = aggregates.get(groupByField);
                     Integer o1 = ((IntField) tuple.getField(agg)).getValue();
-                    Integer o2 = ((IntField) tup.getField(afield)).getValue();
+                    Integer o2 = addedValue;
                     Integer currCount = groupCount.get(groupByField);
+                    chosenField = groupByField;
                     tuple.setField(agg, new IntField(aggregateByOp(o1, o2, what, currCount)));
                     groupCount.put(groupByField, currCount + 1);
                 } else {
@@ -103,6 +113,7 @@ public class IntegerAggregator implements Aggregator {
                 }
             }
         }
+
     }
 
     /**
@@ -111,9 +122,13 @@ public class IntegerAggregator implements Aggregator {
      * @param tup
      */
     private void addNewGroupByTuple(Tuple tup) {
-        Type afieldType = tup.getTupleDesc().getFieldType(afield);
-        String afieldName = tup.getTupleDesc().getFieldName(afield);
-        String gbFieldName = tup.getTupleDesc().getFieldName(gbfield);
+        Integer addedValue = ((IntField) tup.getField(afield)).getValue();
+        TupleDesc oldTd = tup.getTupleDesc();
+        Type afieldType = oldTd.getFieldType(afield);
+        Field tupGroupByField = tup.getField(gbfield);
+
+        String afieldName = oldTd.getFieldName(afield);
+        String gbFieldName = oldTd.getFieldName(gbfield);
         TupleDesc td = new TupleDesc(
                 new Type[]{gbfieldtype, afieldType},
                 new String[]{gbFieldName, afieldName}
@@ -121,31 +136,32 @@ public class IntegerAggregator implements Aggregator {
         /* create first tuple in aggregate */
         Tuple first = new Tuple(td);
         /* set  */
-        first.setField(0, tup.getField(gbfield));
+        first.setField(0, tupGroupByField);
         if (what == Op.COUNT) {
             first.setField(1, new IntField(1));
         } else {
-            first.setField(afield, tup.getField(afield));
+            first.setField(1, tup.getField(afield));
         }
-        aggregates.put(tup.getField(gbfield), first);
-        groupCount.put(tup.getField(gbfield), 1);
+        aggregates.put(tupGroupByField, first);
+        groupCount.put(tupGroupByField, 1);
+        groupAvgTemp.put(tupGroupByField, (double) addedValue);
     }
 
     private Integer aggregateByOp(Integer o1, Integer o2, Op op, Integer count) {
-        switch (op) {
-            case AVG:
-                return (o1 * count + o2) / (count + 1);
-            case MAX:
-                return Math.max(o1, o2);
-            case MIN:
-                return Math.min(o1, o2);
-            case SUM:
-                return o1 + o2;
-            case COUNT:
-                return count + 1;
-            default:
-                return 0;
+        if (gbfield == NO_GROUPING) {
+            avgTemp = (avgTemp * count + o2) / (count * 1.0 + 1);
+        } else {
+            avgTemp = (groupAvgTemp.get(chosenField) * count + o2) / (count * 1.0 + 1);
+            groupAvgTemp.put(chosenField, avgTemp);
         }
+        return switch (op) {
+            case AVG -> (int) avgTemp;
+            case MAX -> Math.max(o1, o2);
+            case MIN -> Math.min(o1, o2);
+            case SUM -> o1 + o2;
+            case COUNT -> count + 1;
+            default -> 0;
+        };
     }
 
     /**
@@ -162,25 +178,25 @@ public class IntegerAggregator implements Aggregator {
             return new OpIterator() {
                 private Iterator<Tuple> it;
                 @Override
-                public void open() throws DbException, TransactionAbortedException {
+                public void open()  {
                     ArrayList<Tuple> list = new ArrayList<>();
                     list.add(result);
                     it = list.iterator();
                 }
 
                 @Override
-                public boolean hasNext() throws DbException, TransactionAbortedException {
+                public boolean hasNext() {
                     return it.hasNext();
                 }
 
                 @Override
-                public Tuple next() throws DbException, TransactionAbortedException, NoSuchElementException {
+                public Tuple next() {
                     if (!it.hasNext() || it == null) return null;
                     return it.next();
                 }
 
                 @Override
-                public void rewind() throws DbException, TransactionAbortedException {
+                public void rewind() {
                     close();
                     open();
                 }
@@ -199,23 +215,23 @@ public class IntegerAggregator implements Aggregator {
             return new OpIterator() {
                 private Iterator<Tuple> it;
                 @Override
-                public void open() throws DbException, TransactionAbortedException {
+                public void open() {
                     it = aggregates.values().iterator();
                 }
 
                 @Override
-                public boolean hasNext() throws DbException, TransactionAbortedException {
+                public boolean hasNext() {
                     return it.hasNext();
                 }
 
                 @Override
-                public Tuple next() throws DbException, TransactionAbortedException, NoSuchElementException {
+                public Tuple next() {
                     if (it == null || !it.hasNext()) return null;
                     return it.next();
                 }
 
                 @Override
-                public void rewind() throws DbException, TransactionAbortedException {
+                public void rewind() {
                     close();
                     open();
                 }

@@ -3,11 +3,10 @@ package simpledb.storage;
 import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
+import simpledb.transaction.Transaction;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
-
 import java.io.*;
-
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -30,72 +29,171 @@ public class BufferPool {
     }
     static class PageLock {
         LockType lockType;
-        TransactionId tid;
         PageId pageId;
-        boolean isPhase1;
-        List<TransactionId> sharedTxns;
-
+        private final Set<TransactionId> txns;
 
         PageLock(LockType type, TransactionId tid, PageId pageId) {
             lockType = type;
-            this.tid = tid;
             this.pageId = pageId;
-            isPhase1 = true;
-            sharedTxns = new LinkedList<>();
+            txns = new HashSet<>();
+            txns.add(tid);
         }
+
+        public PageId getPageId() { return pageId; }
+
     }
     static class LockManager {
-        private final Map<PageId, PageLock> pageLocks;
+        public final ConcurrentMap<PageId, PageLock> pageLocks;
+        public final ConcurrentMap<TransactionId, Set<PageId>> pagesLockedByTid;
+
+        public ConcurrentMap<TransactionId, Set<PageId>> getPagesLockedByTid() {
+            return pagesLockedByTid;
+        }
 
         public LockManager() {
-            pageLocks = new HashMap<>();
+            pageLocks = new ConcurrentHashMap<>();
+            pagesLockedByTid = new ConcurrentHashMap<>();
         }
 
-        public void acquireLock(TransactionId tid ,PageId pageId, LockType type) {
-            // create a thread to do the request
+        private void checkRep() {
+            Set<PageId> pageIds = pageLocks.keySet();
+            for (PageId pageId : pageIds) {
+                Set<TransactionId> holdByTxn = pageLocks.get(pageId).txns;
+                for (TransactionId tid : holdByTxn) {
+                    if (!pagesLockedByTid.containsKey(tid)) {
+                        throw new RuntimeException("Should have tid in pagesLockedById");
+                    }
+                    if (!pagesLockedByTid.get(tid).contains(pageId)) {
 
-            // check if this pageId is in current lock state
-
-            // if there is shared lock, and acquires for a shared lock, granted
-
-
-            // if there is an exclusive lock, x-lock and s-lock should both wait
-
-
+                        throw new RuntimeException("Should have pageId " + pageId +  " in txn " + tid + " pagesLockedById");
+                    }
+                }
+            }
         }
 
-        private void acquiresLockThread(TransactionId tid ,PageId pageId, LockType lockType) {
+
+        public synchronized boolean acquiresLock(TransactionId tid , PageId pageId, LockType lockType) throws TransactionAbortedException {
+            // checkRep();
             // if there is no such lock, create a lock with given type
+            boolean log = false;
+            String threadName = Thread.currentThread().getName();
+            String baseInfo =  "------ACQUIRE------[Tid " + tid.getId() + " % " + threadName + " % " + lockType + " % " + pageId.getPageNumber() + "]";
+            if (log) System.out.println(baseInfo + " ----START.");
+
             if (!pageLocks.containsKey(pageId)) {
-                addLock(tid, pageId, lockType);
-                return;
+                if (log) System.out.println(baseInfo + ": no lock. add lock.----END.");
+                pageLocks.put(pageId, new PageLock(lockType, tid, pageId));
+
+                if (!pagesLockedByTid.containsKey(tid)) {
+                    Set<PageId> tidPages = new HashSet<>();
+                    tidPages.add(pageId);
+                    pagesLockedByTid.put(tid, tidPages);
+                }
+                pagesLockedByTid.get(tid).add(pageId);
+                return true;
             }
 
             PageLock pageLock = pageLocks.get(pageId);
-            TransactionId ownerTid = pageLock.tid;
             LockType oldLockType = pageLock.lockType;
+            Set<TransactionId> ownerTxns = pageLock.txns;
 
-            if (oldLockType == LockType.SLOCK || lockType == LockType.SLOCK) {
-                pageLock.sharedTxns.add(tid);
+            // if there is shared lock, and acquires for a shared lock, granted
+            if (oldLockType == LockType.SLOCK
+                    && lockType == LockType.SLOCK && !ownerTxns.contains(tid)) {
+                if (log) System.out.println(baseInfo + "]: already has a shared lock, granted.----END");
+                pageLock.txns.add(tid);
+                if (!pagesLockedByTid.containsKey(tid)) {
+                    Set<PageId> tidPages = new HashSet<>();
+                    tidPages.add(pageId);
+                    pagesLockedByTid.put(tid, tidPages);
+                } else {
+                    pagesLockedByTid.get(tid).add(pageId);
+                }
+                return true;
+            }
+
+            if (ownerTxns.contains(tid)) {
+                if (lockType == oldLockType) {
+                    if (log) System.out.println(baseInfo + ": already has the same shared or exclusive lock.-----END");
+                    return true;
+                } else if (oldLockType == LockType.SLOCK && lockType == LockType.XLOCK) {
+                    // check if it can update the lock
+                    if ( ownerTxns.size() == 1) {
+                        if (log) System.out.println(baseInfo + ": want to update lock, hold by it self, update.---END");
+                        pageLock.lockType = LockType.XLOCK;
+                        return true;
+                    } else {
+                        if (log) System.out.println(baseInfo + ": want to update lock, hold by other, cannot update. ----WAIT");
+                        throw new TransactionAbortedException();
+                    }
+                } else if (oldLockType == LockType.XLOCK && lockType == LockType.SLOCK) {
+                    if (log) System.out.println(baseInfo + ": want to do read on write, granted.----END");
+                    return true;
+                } else {
+                    if (log) System.out.println("Error.");
+                }
+
+            }
+
+            if (log) System.out.println(baseInfo + ": wait..----WAIT");
+
+            try {
+                wait(20);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            return false;
+        }
+
+
+        public synchronized void releaseLock(TransactionId tid ,PageId pageId) {
+            boolean log = false;
+            String threadName = Thread.currentThread().getName();
+            String baseInfo = "+++++RELEASE++++++[Tid:" + tid.getId() + " % " + threadName + " % "  + pageId.getPageNumber() + "]";
+            if (log) System.out.println("START: " + baseInfo + ": releasing...");
+            // check if this txn has the look it wanna release?
+            if (!pageLocks.containsKey(pageId)) {
+                if (log) System.out.println("ERROR" + baseInfo + ": pageLocks keySet problem.");
+                return;
+            }
+            if (!pagesLockedByTid.containsKey(tid)) {
+                if (log) System.out.println("ERROR " + baseInfo +  " pagesLockedByTid keySet problem.");
+                return;
+            }
+            PageLock pageLock = pageLocks.get(pageId);
+            Set<TransactionId> ownerTxns = pageLock.txns;
+            // cannot release lock hold by other txns
+            if (!ownerTxns.contains(tid)) {
+                if (log) System.out.println("ERROR " + baseInfo + ": pageLocks values problem");
                 return;
             }
 
-            try {
-                wait();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+            if (!pagesLockedByTid.get(tid).contains(pageId)) {
+                if (log) System.out.println("ERROR " + baseInfo + ": pagesLockedByTid values problem");
+                return;
             }
 
-            addLock(tid, pageId, lockType);
-
-        }
-
-        private void addLock(TransactionId tid ,PageId pageId, LockType lockType) {
-            pageLocks.put(pageId, new PageLock(lockType, tid, pageId));
-            if (lockType == LockType.SLOCK) pageLocks.get(pageId).sharedTxns.add(tid);
-        }
-
-        public void releaseLock(TransactionId tid ,PageId pageId) {
+            LockType type = pageLock.lockType;
+            // if it is shared lock, remove this lock from list,
+            // if list is empty, remove the lock from the hashtable
+            if (type == LockType.SLOCK) {
+                pageLock.txns.remove(tid);
+                pagesLockedByTid.get(tid).remove(pageId);
+                if (ownerTxns.isEmpty()) {
+                    pageLocks.remove(pageId);
+                    if (pagesLockedByTid.get(tid).isEmpty() ) {
+                        pagesLockedByTid.remove(tid);
+                    }
+                }
+            } else {
+                // it is exclusive lock
+                pageLocks.remove(pageId);
+                pagesLockedByTid.get(tid).remove(pageId);
+                if (pagesLockedByTid.get(tid).isEmpty() ) {
+                    pagesLockedByTid.remove(tid);
+                }
+            }
+            notifyAll();
         }
     }
 
@@ -116,6 +214,7 @@ public class BufferPool {
     /* buffered pages */
     private final ConcurrentMap<PageId, Page> pages;
     private final int numPages;
+    private final LockManager lockManager;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -127,6 +226,7 @@ public class BufferPool {
         this.numPages = numPages;
         this.pages = new ConcurrentHashMap<>();
         this.doublyDeque = new LinkedList<>();
+        lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -163,10 +263,17 @@ public class BufferPool {
         // some code goes here
 
         // check permission
+        LockType lockType;
+        if (perm == Permissions.READ_ONLY) lockType = LockType.SLOCK;
+        else lockType = LockType.XLOCK;
 
-        // if read_only, acquires a shared lock
-
-        // if read_write, acquires an exclusive lock
+        long st = System.currentTimeMillis();
+        boolean isAcquired = false;
+        while (!isAcquired) {
+            isAcquired = lockManager.acquiresLock(tid, pid, lockType);
+            if (System.currentTimeMillis() - st > 1000)
+                throw new TransactionAbortedException();
+        }
 
         if (this.pages.containsKey(pid)) {
             doublyDeque.remove(pid);
@@ -180,7 +287,7 @@ public class BufferPool {
             /* if this page not in that file return null */
             if (page == null) return null;
 
-            if (pages.size() > numPages) {
+            if (pages.size() >= numPages) {
                 evictPage();
             }
             pages.put(pid, page);
@@ -202,6 +309,7 @@ public class BufferPool {
     public  void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
+        lockManager.releaseLock(tid, pid);
     }
 
     /**
@@ -212,13 +320,16 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid) {
         // some code goes here
         // not necessary for lab1|lab2
+        transactionComplete(tid, true);
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for lab1|lab2
-        return false;
+        if (!lockManager.pageLocks.containsKey(p)) return false;
+        if (!lockManager.pageLocks.get(p).txns.contains(tid)) return false;
+        return true;
     }
 
     /**
@@ -228,9 +339,45 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      * @param commit a flag indicating whether we should commit or abort
      */
-    public void transactionComplete(TransactionId tid, boolean commit) {
+    public synchronized void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
         // not necessary for lab1|lab2
+        if (!lockManager.getPagesLockedByTid().containsKey(tid)) return;
+        if (commit) {
+
+            try {
+                flushPages(tid);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            restorePages(tid);
+        }
+        // release lock
+        // copy initialization
+        Set<PageId>  pageIds = new HashSet<>(lockManager.getPagesLockedByTid().get(tid));
+        for (PageId pageId : pageIds)
+            lockManager.releaseLock(tid, pageId);
+    }
+
+    public void restorePages(TransactionId tid) {
+        // get dirty pageIds
+        // read pages from disk
+        // replace them in file
+        Set<PageId> pageIds = lockManager.getPagesLockedByTid().get(tid);
+        List<PageId> pageIdList = pageIds.stream().toList();
+        int tableId = pageIdList.get(0).getTableId();
+        DbFile tableFile = Database.getCatalog().getDatabaseFile(tableId);
+        for (PageId pageId : pageIds) {
+            if (pageId.getTableId() != tableId) {
+                tableId = pageId.getTableId();
+                tableFile = Database.getCatalog().getDatabaseFile(tableId);
+            }
+            Page page = tableFile.readPage(pageId);
+            pages.remove(pageId);
+            pages.put(pageId, page);
+
+        }
     }
 
     /**
@@ -258,6 +405,7 @@ public class BufferPool {
         for (Page page : dirtyPages) {
             page.markDirty(true, tid);
             pages.put(page.getId(), page);
+            doublyDeque.push(page.getId());
         }
         // not necessary for lab1
 
@@ -296,6 +444,12 @@ public class BufferPool {
     public synchronized void flushAllPages() throws IOException {
         // some code goes here
         // not necessary for lab1
+        Set<PageId> bufferedPages = pages.keySet();
+        for (PageId pageId : bufferedPages) {
+            if (pages.get(pageId).isDirty() != null) {
+                flushPage(pageId);
+            }
+        }
 
     }
 
@@ -310,6 +464,21 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+
+        /*
+        if (lockManager.pageLocks.containsKey(pid)) {
+            Set<TransactionId> tids = lockManager.pageLocks.get(pid).txns;
+            for (TransactionId tid : tids) {
+                if (lockManager.pagesLockedByTid.containsKey(tid)) {
+                    lockManager.pagesLockedByTid.get(tid).remove(pid);
+                    if (lockManager.pagesLockedByTid.get(pid).isEmpty()) {
+                        lockManager.pagesLockedByTid.remove(tid);
+                    }
+                }
+            }
+            lockManager.pageLocks.remove(pid);
+        }
+         */
         pages.remove(pid);
         doublyDeque.remove(pid);
     }
@@ -328,9 +497,16 @@ public class BufferPool {
 
     /** Write all pages of the specified transaction to disk.
      */
-    public synchronized  void flushPages(TransactionId tid) throws IOException {
+    public void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        if (!lockManager.getPagesLockedByTid().containsKey(tid)) return;
+        Set<PageId> pageIds = new HashSet<>(lockManager.getPagesLockedByTid().get(tid));
+        for (PageId pageId : pageIds) {
+            if (pages.containsKey(pageId)) {
+                flushPage(pageId);
+            }
+        }
     }
 
     /**
@@ -340,17 +516,39 @@ public class BufferPool {
     private synchronized  void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
-        /* find the least recently used page */
-
-        PageId lastPage = doublyDeque.removeLast();
-
-        /* flush this page to disk */
-        try {
-            flushPage(lastPage);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to flush pages.");
+        // PageId lastPage = doublyDeque.removeLast();
+        Iterator<PageId> it = doublyDeque.descendingIterator();
+        PageId notDirtyPageId = null;
+        while (it.hasNext()) {
+            PageId pageId = it.next();
+            if (pages.get(pageId).isDirty() == null) {
+                notDirtyPageId = pageId;
+                break;
+            }
         }
-        pages.remove(lastPage);
+        /*
+        Set<PageId>  pageIds = pages.keySet();
+        for (PageId pageId : pageIds) {
+            if (pages.get(pageId).isDirty() == null) {
+                notDirtyPageId =
+            }
+        }
+         */
+
+        if (notDirtyPageId != null) {
+            /* flush this page to disk */
+            try {
+                flushPage(notDirtyPageId);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to flush page to dish.");
+            }
+            discardPage(notDirtyPageId);
+        } else {
+            throw new DbException("All pages are dirty, cannot do eviction.");
+        }
+
+
+
 
     }
 

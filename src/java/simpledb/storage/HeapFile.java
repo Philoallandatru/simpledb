@@ -134,16 +134,21 @@ public class HeapFile implements DbFile {
         List<Page> result = new LinkedList<>();
         /* choose a page with empty slot */
         for (int i = 0; i < numPages(); i++) {
-            HeapPage readPage = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(tableId, i), Permissions.READ_ONLY);
+            BufferPool bufferPool = Database.getBufferPool();
+            HeapPageId heapPageId = new HeapPageId(tableId, i);
+            HeapPage readPage = (HeapPage) bufferPool.getPage(tid, heapPageId, Permissions.READ_ONLY);
             /* if there are empty slots, insert into it */
             if (readPage.getNumEmptySlots() > 0) {
-                HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(tableId, i), Permissions.READ_WRITE);
+                HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, heapPageId, Permissions.READ_WRITE);
                 page.insertTuple(t);
 
                 /* mark dirty */
                 page.markDirty(true, tid);
                 result.add(page);
                 return result;
+            } else {
+                // page is full, release the shared lock
+                bufferPool.unsafeReleasePage(tid, heapPageId);
             }
         }
         /* no empty pages, need to create new page */
@@ -207,6 +212,7 @@ public class HeapFile implements DbFile {
                 /* the heapFile id is table id */
                 HeapPageId heapPageId = new HeapPageId(this.heapFile.getId(), pageNo);
                 HeapPage heapPage = (HeapPage) Database.getBufferPool().getPage(this.tid, heapPageId, Permissions.READ_ONLY);
+                if (heapPage == null) return null;
                 return heapPage.iterator();
             } else {
                 throw new TransactionAbortedException();
@@ -217,6 +223,13 @@ public class HeapFile implements DbFile {
         public void open() throws DbException, TransactionAbortedException {
             pageNo = 0;
             it = getPageTupleIterator(pageNo);
+            while (pageNo < pageNums) {
+                if (it != null) break;
+                else {
+                    pageNo += 1;
+                    it = getPageTupleIterator(pageNo);
+                }
+            }
             if (it == null) {
                 throw new DbException("first page iterator is null.");
             }

@@ -15,7 +15,7 @@ public class Tuple implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private Field[] fields;
+    private final Field[] fields;
     private TupleDesc tupleDesc;
     private RecordId recordId = null;
 
@@ -28,13 +28,13 @@ public class Tuple implements Serializable {
      */
     public Tuple(TupleDesc td) {
         // some code goes here
-        this.tupleDesc = td;
-        this.fields = new Field[td.numFields()];
+        tupleDesc = td;
+        fields = new Field[td.numFields()];
         for (int i = 0; i < td.numFields(); i++) {
-            if (this.tupleDesc.getFieldType(i).equals(Type.INT_TYPE)) {
-                this.fields[i] = new IntField(0);
-            } else if (this.tupleDesc.getFieldType(i).equals(Type.STRING_TYPE)) {
-                this.fields[i] = new StringField("", 0);
+            if (tupleDesc.getFieldType(i).equals(Type.INT_TYPE)) {
+                fields[i] = new IntField(0);
+            } else if (tupleDesc.getFieldType(i).equals(Type.STRING_TYPE)) {
+                fields[i] = new StringField("", 0);
             } else {
 
             }
@@ -46,7 +46,7 @@ public class Tuple implements Serializable {
      */
     public TupleDesc getTupleDesc() {
         // some code goes here
-        return this.tupleDesc;
+        return tupleDesc;
     }
 
     /**
@@ -55,7 +55,7 @@ public class Tuple implements Serializable {
      */
     public RecordId getRecordId() {
         // some code goes here
-        return this.recordId;
+        return recordId;
     }
 
     /**
@@ -66,7 +66,7 @@ public class Tuple implements Serializable {
      */
     public void setRecordId(RecordId rid) {
         // some code goes here
-        this.recordId = rid;
+        recordId = rid;
     }
 
     /**
@@ -79,10 +79,10 @@ public class Tuple implements Serializable {
      */
     public void setField(int i, Field f) {
         // some code goes here
-        if (i < 0 || i >= this.fields.length) {
+        if (i < 0 || i >= fields.length) {
             throw new IndexOutOfBoundsException();
         }
-        this.fields[i] = f;
+        fields[i] = f;
     }
 
     /**
@@ -93,7 +93,7 @@ public class Tuple implements Serializable {
      */
     public Field getField(int i) {
         // some code goes here
-        if (i < 0 || i >= this.fields.length) {
+        if (i < 0 || i >= fields.length) {
             throw new IndexOutOfBoundsException();
         }
         return this.fields[i];
@@ -110,10 +110,10 @@ public class Tuple implements Serializable {
     public String toString() {
         // some code goes here
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < this.tupleDesc.numFields() - 1; i++) {
-            sb.append(this.tupleDesc.getFieldName(i)).append(": " + this.getField(i)).append("  ");
+        for (int i = 0; i < tupleDesc.numFields() - 1; i++) {
+            sb.append(this.tupleDesc.getFieldName(i)).append(": ").append(this.getField(i)).append("  ");
         }
-        sb.append(this.tupleDesc.getFieldName(this.tupleDesc.numFields()- 1)).append(": " + this.getField(tupleDesc.numFields()-1)).append("\n");
+        sb.append(this.tupleDesc.getFieldName(this.tupleDesc.numFields() - 1)).append(": ").append(this.getField(tupleDesc.numFields() - 1)).append("\n");
         return sb.toString();
     }
 
