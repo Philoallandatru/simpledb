@@ -188,7 +188,52 @@ public class BTreeFile implements DbFile {
                                        Field f)
 					throws DbException, TransactionAbortedException {
 		// some code goes here
-        return null;
+
+		Permissions read = Permissions.READ_ONLY;
+		if (pid.pgcateg() == BTreePageId.LEAF) {
+			return (BTreeLeafPage) getPage(tid, dirtypages ,pid, perm);
+		}
+		// now it must be internal page
+		BTreeInternalPage currPage = (BTreeInternalPage) getPage(tid, dirtypages ,pid, read);
+		BTreePageId currPageId = currPage.pid;
+
+		while (true) {
+			Iterator<BTreeEntry> entryIt = currPage.iterator();
+			if (f == null) {
+				// find the left most leaf page
+
+				BTreeEntry entry = entryIt.next();
+				currPageId = entry.getLeftChild();
+				if (currPageId.pgcateg() == BTreePageId.LEAF)
+					return (BTreeLeafPage) getPage(tid, dirtypages, currPageId, perm);
+				currPage = (BTreeInternalPage) getPage(tid, dirtypages,  currPageId, read);
+				continue;
+			}
+			while (entryIt.hasNext()) {
+				BTreeEntry entry = entryIt.next();
+				if (entry.getKey().compare(Op.GREATER_THAN, f)) {
+					currPageId = entry.getLeftChild();
+					if (currPageId.pgcateg() == BTreePageId.LEAF) {
+						return (BTreeLeafPage) getPage(tid, dirtypages, currPageId, perm);
+					} else {
+						currPage = (BTreeInternalPage) getPage(tid, dirtypages, currPageId, perm);
+						break;
+					}
+				} else if (!entryIt.hasNext()) {
+					// at the last node
+					currPageId = entry.getRightChild();
+					if (currPageId.pgcateg() == BTreePageId.LEAF)
+						return (BTreeLeafPage) getPage(tid, dirtypages, currPageId, perm);
+					else {
+						currPage = (BTreeInternalPage) getPage(tid, dirtypages ,currPageId, read);
+						break;
+					}
+				}
+
+			}
+		}
+
+
 	}
 	
 	/**
@@ -216,7 +261,7 @@ public class BTreeFile implements DbFile {
 	 * pointers as needed.  
 	 * 
 	 * Return the leaf page into which a new tuple with key field "field" should be inserted.
-	 * 
+	 *
 	 * @param tid - the transaction id
 	 * @param dirtypages - the list of dirty pages which should be updated with all new dirty pages
 	 * @param page - the leaf page to split
@@ -239,8 +284,81 @@ public class BTreeFile implements DbFile {
 		// the new entry.  getParentWithEmtpySlots() will be useful here.  Don't forget to update
 		// the sibling pointers of all the affected leaf pages.  Return the page into which a 
 		// tuple with the given key field should be inserted.
-        return null;
-		
+
+		// todo splitLeafPage()
+		// add new leaf
+		/*
+		BTreeLeafPage newLeafPage = (BTreeLeafPage) getEmptyPage(tid, dirtypages, BTreePageId.LEAF);
+		Iterator<Tuple>	reverseIt = page.reverseIterator();
+		int numTuplesInNewLeaf = page.getMaxTuples()  / 2;
+		BTreePageId newLeafPageId = newLeafPage.getId();
+
+		for (int i = 0; i < numTuplesInNewLeaf; i++) {
+			Tuple tuple = reverseIt.next();
+			page.deleteTuple(tuple);
+			newLeafPage.insertTuple(tuple);
+		}
+
+		Field insertedField = newLeafPage.iterator().next().getField(keyField);
+
+		// set siblings relation
+		BTreePageId rightSibling = page.getRightSiblingId();
+		newLeafPage.setLeftSiblingId(page.getId());
+		page.setRightSiblingId(newLeafPageId);
+		newLeafPage.setRightSiblingId(null);
+		if (rightSibling != null) {
+			BTreeLeafPage originalRightSiblingLeaf = (BTreeLeafPage) getPage(tid, dirtypages, rightSibling, Permissions.READ_WRITE);
+			originalRightSiblingLeaf.setLeftSiblingId(newLeafPageId);
+		}
+		// update parent
+		BTreePageId parentId = page.getParentId();
+		BTreeInternalPage parent = getParentWithEmptySlots(tid, dirtypages, parentId, insertedField);
+		BTreeEntry insertedEntry = new BTreeEntry(field, page.getId(), newLeafPageId);
+		parent.insertEntry(insertedEntry);
+		updateParentPointers(tid, dirtypages, parent);
+		parent.updateEntry(insertedEntry);
+
+		return insertedField.compare(Op.GREATER_THAN_OR_EQ, field) ? page : newLeafPage;
+
+		 */
+
+		int half = page.getNumTuples() / 2;
+		BTreeLeafPage newPage = (BTreeLeafPage) getEmptyPage(tid, dirtypages, BTreePageId.LEAF);
+		Iterator<Tuple> iterator = page.reverseIterator();
+		while (iterator.hasNext() && half > 0) {
+			Tuple next = iterator.next();
+			//这里要先删除在插入，就很坑
+			page.deleteTuple(next);
+			newPage.insertTuple(next);
+			half--;
+		}
+		//2. 获取当前要插入的父节点，并插入新节点
+		Tuple up = iterator.next();
+		BTreeInternalPage parentPage = getParentWithEmptySlots(tid, dirtypages, page.getParentId(), field);
+		BTreeEntry insetEntry = new BTreeEntry(up.getField(keyField), page.getId(), newPage.getId());
+		parentPage.insertEntry(insetEntry);
+		//3. 设置节点间的关系
+		// page newPage rightSibling
+		if (page.getRightSiblingId() != null) {
+			BTreeLeafPage right = (BTreeLeafPage) getPage(tid, dirtypages, page.getRightSiblingId(), Permissions.READ_WRITE);
+			right.setLeftSiblingId(newPage.getId());
+			dirtypages.put(right.getId(),right);
+		}
+		newPage.setRightSiblingId(page.getRightSiblingId());
+		newPage.setLeftSiblingId(page.getId());
+		page.setRightSiblingId(newPage.getId());
+
+		//4. 增加脏页
+		dirtypages.put(parentPage.getId(),parentPage);
+		dirtypages.put(page.getId(),page);
+		dirtypages.put(newPage.getId(),newPage);
+
+		//5. 返回要插入field的页
+		if (field.compare(Op.GREATER_THAN_OR_EQ, up.getField(keyField))) {
+			return newPage;
+		}
+		return page;
+
 	}
 	
 	/**
@@ -277,7 +395,75 @@ public class BTreeFile implements DbFile {
 		// the parent pointers of all the children moving to the new page.  updateParentPointers()
 		// will be useful here.  Return the page into which an entry with the given key field
 		// should be inserted.
-		return null;
+		// todo splitInternalPage()
+
+		/*
+		BTreeInternalPage newInternalPage = (BTreeInternalPage) getEmptyPage(tid, dirtypages, BTreePageId.INTERNAL);
+		Iterator<BTreeEntry> reverseIt = page.reverseIterator();
+		int numEntriesInFirst = page.getNumEntries() / 2;
+		for (int i = 0; i < numEntriesInFirst; i++) {
+			BTreeEntry bTreeEntry = reverseIt.next();
+			page.deleteKeyAndRightChild(bTreeEntry);
+			newInternalPage.insertEntry(bTreeEntry);
+		}
+
+		// dirtypages.put(newInternalPage.getId(), newInternalPage);
+
+		// BTreeEntry middleEntry = reverseIt.next();
+		// page.deleteKeyAndRightChild(middleEntry);
+
+
+		// set new entry for insert in parent node
+		BTreeEntry middleEntry = newInternalPage.iterator().next();
+		newInternalPage.deleteKeyAndRightChild(middleEntry);
+		Field insertInParentField = middleEntry.getKey();
+		middleEntry.setLeftChild(page.getId());
+		middleEntry.setRightChild(page.getId());
+
+		BTreeInternalPage parent = getParentWithEmptySlots(tid, dirtypages, page.getParentId(), insertInParentField);
+		parent.insertEntry(middleEntry);
+		parent.updateEntry(middleEntry);
+		newInternalPage.setParentId(page.getId());
+		page.setParentId(page.getId());
+
+		updateParentPointers(tid, dirtypages, parent);
+		updateParentPointers(tid, dirtypages, newInternalPage);
+		return insertInParentField.compare(Op.GREATER_THAN_OR_EQ, field) ?  newInternalPage : page;
+		*/
+
+		int half = page.getNumEntries()/2;
+		BTreeInternalPage newPage = (BTreeInternalPage) getEmptyPage(tid, dirtypages, BTreePageId.INTERNAL);
+		Iterator<BTreeEntry> iterator = page.reverseIterator();
+		while(iterator.hasNext() && half>0){
+			BTreeEntry next = iterator.next();
+			page.deleteKeyAndRightChild(next);
+			newPage.insertEntry(next);
+			half--;
+		}
+		//2. 分裂完，中间的entry插入父节点。注意up节点要在原page中删除，并设置左右子节点。
+		BTreeEntry up = iterator.next();
+		page.deleteKeyAndRightChild(up);
+		up.setLeftChild(page.getId());
+		up.setRightChild(newPage.getId());
+		//这里父节点可能还会分裂获取
+		BTreeInternalPage parentPage = getParentWithEmptySlots(tid, dirtypages, page.getParentId(), field);
+		parentPage.insertEntry(up);
+		page.setParentId(parentPage.getId());
+		newPage.setParentId(parentPage.getId());
+
+		//3. 设置newPage子节点的父节点指向
+		updateParentPointers(tid,dirtypages,newPage);
+
+		//4. 增加脏页
+		dirtypages.put(parentPage.getId(),parentPage);
+		dirtypages.put(newPage.getId(),newPage);
+		dirtypages.put(page.getId(),page);
+		//5. 返回要插入field的页
+		if (field.compare(Op.GREATER_THAN_OR_EQ, up.getKey())) {
+			return newPage;
+		}
+		return page;
+
 	}
 	
 	/**

@@ -9,6 +9,7 @@ import simpledb.storage.*;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -109,11 +110,9 @@ public class TableStats {
         int numFields = td.numFields();
 
         int[] max = new int[numFields];
-        for (int i = 0; i < numFields; i++)
-            max[i] = Integer.MIN_VALUE;
+        Arrays.fill(max, Integer.MIN_VALUE);
         int[] min = new int[numFields];
-        for (int i = 0; i < numFields; i++)
-            min[i] = Integer.MAX_VALUE;
+        Arrays.fill(min, Integer.MAX_VALUE);
 
         Tuple t;
         numPages = table.numPages();

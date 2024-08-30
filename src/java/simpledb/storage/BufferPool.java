@@ -328,8 +328,7 @@ public class BufferPool {
         // some code goes here
         // not necessary for lab1|lab2
         if (!lockManager.pageLocks.containsKey(p)) return false;
-        if (!lockManager.pageLocks.get(p).txns.contains(tid)) return false;
-        return true;
+        return lockManager.pageLocks.get(p).txns.contains(tid);
     }
 
     /**
@@ -344,7 +343,6 @@ public class BufferPool {
         // not necessary for lab1|lab2
         if (!lockManager.getPagesLockedByTid().containsKey(tid)) return;
         if (commit) {
-
             try {
                 flushPages(tid);
             } catch (IOException e) {
@@ -492,7 +490,23 @@ public class BufferPool {
         // not necessary for lab1
         int tableId = pid.getTableId();
         DbFile tableFile = Database.getCatalog().getDatabaseFile(tableId);
+
+        // append an update record to the log, with
+        // a before-image and after-image.
+
+        Page p = pages.get(pid);
+        TransactionId dirtier = p.isDirty();
+
+
+        /* log page if dirty before flushing */
+        if (dirtier != null){
+            Database.getLogFile().logWrite(dirtier, p.getBeforeImage(), p);
+            Database.getLogFile().force();
+        }
+
         tableFile.writePage(pages.get(pid));
+        p.markDirty(false, null);
+
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -505,6 +519,12 @@ public class BufferPool {
         for (PageId pageId : pageIds) {
             if (pages.containsKey(pageId)) {
                 flushPage(pageId);
+
+                Page page = pages.get(pageId);
+                page.isDirty();
+                if (page != null) {
+                    page.setBeforeImage();
+                }
             }
         }
     }

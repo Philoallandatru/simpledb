@@ -48,11 +48,14 @@ public class IntField implements Field {
      * Compare the specified field to the value of this Field.
      * Return semantics are as specified by Field.compare
      *
-     * @throws IllegalCastException if val is not an IntField
+     * // @throws IllegalCastException if val is not an IntField
+     * @throws IllegalArgumentException if not
      * @see Field#compare
      */
     public boolean compare(Predicate.Op op, Field val) {
 
+        if (val.getType() != Type.INT_TYPE)
+            throw new IllegalArgumentException("Not Integer type");
         IntField iVal = (IntField) val;
 
         switch (op) {

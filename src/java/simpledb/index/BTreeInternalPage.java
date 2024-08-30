@@ -458,7 +458,7 @@ public class BTreeInternalPage extends BTreePage {
 			childCategory = e.getLeftChild().pgcateg();
 		}
 		else if(e.getLeftChild().pgcateg() != childCategory || e.getRightChild().pgcateg() != childCategory)
-			throw new DbException("child page category mismatch in insertEntry");
+			throw new DbException("child page category " + childCategory + " mismatch in insertEntry " + e.getRightChild().pgcateg());
 
 		// if this is the first entry, add it and return
 		if(getNumEmptySlots() == getMaxEntries()) {

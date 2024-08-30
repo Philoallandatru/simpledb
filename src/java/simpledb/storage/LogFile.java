@@ -460,6 +460,39 @@ public class LogFile {
             synchronized(this) {
                 preAppend();
                 // some code goes here
+                // 找到该事务在file中的第一个记录的偏移量
+                long offset = tidToFirstLogRecord.get(tid.getId());
+                raf.seek(offset);
+                // 顺序访问直到文件末尾
+                while (true) {
+                    try {
+                        int type = raf.readInt();  // 记录类型
+                        long record_tid = raf.readLong();  // TID
+                        switch (type) {
+                            case UPDATE_RECORD: // 更新记录
+                                Page before = readPageData(raf);  // 旧数据
+                                Page after = readPageData(raf);   // 新数据
+                                if(record_tid == tid.getId()){
+                                    // 先把此页面从缓存中去除
+                                    Database.getBufferPool().discardPage(before.getId());
+                                    // 然后把旧数据写入Table文件
+                                    Database.getCatalog().getDatabaseFile(before.getId().getTableId()).writePage(before);
+                                }
+                                break;
+                            case CHECKPOINT_RECORD:  // 跳过所有检查点记录
+                                int numXactions = raf.readInt();
+                                while (numXactions-- > 0) {
+                                    long xid = raf.readLong();
+                                    long xoffset = raf.readLong();
+                                }
+                                break;
+                        }
+
+                        raf.readLong();  // 跳过start指针
+                    } catch (EOFException e) {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -487,6 +520,110 @@ public class LogFile {
             synchronized (this) {
                 recoveryUndecided = false;
                 // some code goes here
+                recoveryUndecided = false;
+
+                /* redo就是写入afterimage，undo就是写入beforeimage */
+                // 已提交的事务ID集合
+                Set<Long> commitedIds = new HashSet<>();
+                // 检查点存储的活跃事务集合
+                Map<Long, Long> activeTxns = new HashMap<>();
+                // 从检查点往后所有事务的集合（所有的旧页面和新页面）
+                Map<Long, List<Page>> beforePages = new HashMap<>();
+                Map<Long, List<Page>> afterPages = new HashMap<>();
+
+                long cpOffset = raf.readLong();  // 检查点位置
+                if(cpOffset != -1){
+                    raf.seek(cpOffset);  // 如果有检查点，直接从此处开始
+                }
+                // 顺序访问直到文件末尾
+                while (true) {
+                    try {
+                        int type = raf.readInt();  // 记录类型
+                        long record_tid = raf.readLong();  // TID
+                        switch (type) {
+                            case UPDATE_RECORD:
+                                Page before = readPageData(raf);  // 旧数据
+                                Page after = readPageData(raf);   // 新数据
+                                beforePages.computeIfAbsent(record_tid, k->new ArrayList<>()).add(before);
+                                afterPages.computeIfAbsent(record_tid, k->new ArrayList<>()).add(after);
+                                break;
+                            case CHECKPOINT_RECORD:
+                                int numXactions = raf.readInt();
+                                while (numXactions-- > 0) {
+                                    long xid = raf.readLong();
+                                    long xoffset = raf.readLong();
+                                    activeTxns.put(xid, xoffset);  // 记录活跃事务
+                                }
+                                break;
+                            case COMMIT_RECORD:
+                                commitedIds.add(record_tid);  // 记录已提交事务
+                                break;
+                        }
+
+                        raf.readLong();  // 跳过start指针
+                    } catch (EOFException e) {
+                        break;
+                    }
+                }
+
+                /* 注意undo和redo的顺序不能乱，否则redo被undo覆盖 */
+
+                // undo未commit的
+                for(Long record_id : beforePages.keySet()){
+                    if(!commitedIds.contains(record_id)){
+                        List<Page> befores = beforePages.getOrDefault(record_id, new ArrayList<>());
+                        for(Page page : befores){
+                            Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                        }
+                    }
+                }
+
+                // redo已经commit的
+                for(Long record_tid : commitedIds){
+                    List<Page> afters = afterPages.getOrDefault(record_tid, new ArrayList<>());
+                    for(Page page : afters){
+                        Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                    }
+                }
+
+                // 处理在checkpoint之前开始但是在checkpoint还未提交的事务
+                for(Map.Entry<Long,Long> entry : activeTxns.entrySet()){
+                    long active_id = entry.getKey();
+                    long active_offset = entry.getValue();
+                    boolean commited = commitedIds.contains(active_id);
+                    raf.seek(active_offset);
+                    // 代码与上文类似
+                    while (true) {
+                        try {
+                            int type = raf.readInt();
+                            long record_tid = raf.readLong();
+                            switch (type) {
+                                case UPDATE_RECORD:
+                                    Page before = readPageData(raf);
+                                    Page after = readPageData(raf);
+                                    if(commited){
+                                        // redo
+                                        Database.getCatalog().getDatabaseFile(after.getId().getTableId()).writePage(after);
+                                    }else{
+                                        // undo
+                                        Database.getCatalog().getDatabaseFile(before.getId().getTableId()).writePage(before);
+                                    }
+                                    break;
+                                case CHECKPOINT_RECORD:
+                                    int numXactions = raf.readInt();
+                                    while (numXactions-- > 0) {
+                                        long xid = raf.readLong();
+                                        long xoffset = raf.readLong();
+                                    }
+                                    break;
+                            }
+                            raf.readLong();
+                        } catch (EOFException e) {
+                            break;
+                        }
+                    }
+                }
+
             }
          }
     }

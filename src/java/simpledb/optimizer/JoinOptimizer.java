@@ -286,33 +286,69 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
+//        PlanCache planCache = new PlanCache();
+//        CostCard bestCost = new CostCard();
+//        int size = joins.size();
+//        for (int i = 1; i <= size; i++) {
+//            Set<Set<LogicalJoinNode>> allSubsets = enumerateSubsets(joins, i);
+//            for (Set<LogicalJoinNode> joinSubset : allSubsets) {
+//                double bestCostSoFar = Double.MAX_VALUE;
+//                for (LogicalJoinNode joinToRemove : joinSubset) {
+//                    // System.out.println(">>>>>[size: " + i + "]" + " processing: " + joinSubset + " remove: " + joinToRemove );
+//                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, joinToRemove, joinSubset, bestCostSoFar, planCache);
+//                    if (costCard != null) {
+//                        bestCost = costCard;
+//                        bestCostSoFar = costCard.cost;
+//                        // System.out.println("This is better. <<<<<<");
+//                    }
+//                }
+//                if (bestCostSoFar != Double.MAX_VALUE) {
+//                    planCache.addPlan(joinSubset, bestCost.cost, bestCost.card, bestCost.plan);
+//                    // System.out.println("Size[" + i + "]: " + bestCost);
+//                }
+//
+//            }
+//        }
+//        if (explain) {
+//            printJoins(bestCost.plan, planCache, stats, filterSelectivities);
+//        }
+//        return bestCost.plan;
+        //Replace the following
         PlanCache planCache = new PlanCache();
-        CostCard bestCost = new CostCard();
+        CostCard bestCostCard = new CostCard();
+        // join连接对数量
         int size = joins.size();
+        // 动态规划,求出每一层子集的最佳连接计划
         for (int i = 1; i <= size; i++) {
-            Set<Set<LogicalJoinNode>> allSubsets = enumerateSubsets(joins, i);
-            for (Set<LogicalJoinNode> joinSubset : allSubsets) {
+            // 找出给定size的所有子集
+            Set<Set<LogicalJoinNode>> subsets = enumerateSubsets(joins, i);
+            // 计算每个子集最佳连接计划
+            for (Set<LogicalJoinNode> subset : subsets) {
                 double bestCostSoFar = Double.MAX_VALUE;
-                for (LogicalJoinNode joinToRemove : joinSubset) {
-                    // System.out.println(">>>>>[size: " + i + "]" + " processing: " + joinSubset + " remove: " + joinToRemove );
-                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, joinToRemove, joinSubset, bestCostSoFar, planCache);
-                    if (costCard != null) {
-                        bestCost = costCard;
-                        bestCostSoFar = costCard.cost;
-                        // System.out.println("This is better. <<<<<<");
+                for (LogicalJoinNode joinNode : subset) {
+                    CostCard costCard =
+                            computeCostAndCardOfSubplan(stats, filterSelectivities, joinNode, subset, bestCostSoFar, planCache);
+                    // 返回null,说明无法进行JOIN操作或者当前计算得出的连接成本比已经求出的最低成本贵
+                    if (costCard == null) {
+                        continue;
                     }
+                    bestCostSoFar = costCard.cost;
+                    bestCostCard = costCard;
                 }
                 if (bestCostSoFar != Double.MAX_VALUE) {
-                    planCache.addPlan(joinSubset, bestCost.cost, bestCost.card, bestCost.plan);
-                    // System.out.println("Size[" + i + "]: " + bestCost);
+                    planCache.addPlan(subset, bestCostCard.cost, bestCostCard.card, bestCostCard.plan);
                 }
-
             }
         }
+        // 是否需要输出执行计划
         if (explain) {
-            printJoins(bestCost.plan, planCache, stats, filterSelectivities);
+            printJoins(bestCostCard.plan, planCache, stats, filterSelectivities);
         }
-        return bestCost.plan;
+        // 最终动态规划计算得到的最佳JOIN计划
+        // 例如: <t1,t2>,<t2,t3>,<t4,t3> --> 对应的SQL JOIN表示为
+        // t4 join (t1 join t2 join t3)
+        return bestCostCard.plan;
+
 
     }
 
